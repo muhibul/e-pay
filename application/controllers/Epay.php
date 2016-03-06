@@ -17,25 +17,27 @@ class Epay extends CI_Controller {
 	var $cc_ccv;
 	var $cc_type;
 	var $payment_error;
+	var $payment_submission_url;
+	var $braintree_submission_url;
+	var $paypal_submission_url;
+	var $merchant_account_id;
+	var $tr_data;
 
 	function __construct(){
 		parent::__construct();
-		
+		$this->_braintree_init();
+
         $this->load->helper(array('form', 'url'));
 	}
 
-	public function index(){
-		$this->_braintree_init();
-		$data['url'] = Braintree_TransparentRedirect::url();
-		$data['tr_data'] = Braintree_TransparentRedirect::transactionData(
-						array(
-							'redirectUrl' => site_url("epay/braintree"),
-							'transaction' => array(
-								'type' => 'sale',
-							)
-						)
-					);
+	public function index($currency = 'USD'){
+		$this->currency = $currency;
+		$this->_set_transaction_default();
 
+		$data['payment_submission_url'] = $this->payment_submission_url;
+		$data['tr_data'] = $this->tr_data;
+		$data['selected_currency'] = $this->currency;
+		
 		$this->load->view('order_form', $data);
 	}
 
@@ -60,7 +62,7 @@ class Epay extends CI_Controller {
 	    $apiContext->setConfig(
 	        array(
 	            'mode' => 'sandbox',
-	            'log.LogEnabled' => true,
+	            'log.LogEnabled' => false,
 	            'log.FileName' => '../PayPal.log',
 	            'log.LogLevel' => 'DEBUG', // PLEASE USE `FINE` LEVEL FOR LOGGING IN LIVE ENVIRONMENTS
 	            'cache.enabled' => true,
@@ -68,11 +70,6 @@ class Epay extends CI_Controller {
 	            // 'http.headers.PayPal-Partner-Attribution-Id' => '123123123'
 	        )
 	    );
-
-	    // Partner Attribution Id
-	    // Use this header if you are a PayPal partner. Specify a unique BN Code to receive revenue attribution.
-	    // To learn more or to request a BN Code, contact your Partner Manager or visit the PayPal Partner Portal
-	    // $apiContext->addRequestHeader('PayPal-Partner-Attribution-Id', '123123123');
 
 	    return $apiContext;
 	}
@@ -224,7 +221,7 @@ class Epay extends CI_Controller {
 		$transaction = new PayPal\Api\Transaction();
 		$transaction->setAmount($amount)
 		    ->setItemList($itemList)
-		    ->setDescription("Payment description")
+		    ->setDescription("Payment description demo")
 		    ->setInvoiceNumber(uniqid());
 
 		// ### Payment
@@ -260,7 +257,7 @@ class Epay extends CI_Controller {
 		Braintree_Configuration::publicKey('w6myqf4pd67bhn8v');
 		Braintree_Configuration::privateKey('d2a87ea92ccf38881109be930c07e7da');
 
-		//$braintreeUrl = Braintree_TransparentRedirect::url();
+		$this->braintree_submission_url = Braintree_TransparentRedirect::url();
 		//return $clientToken = Braintree_ClientToken::generate();
 	}
 
@@ -298,7 +295,7 @@ class Epay extends CI_Controller {
 	public function braintree(){
 		if (isset($_GET["id"])) {
 			$transaction_id = $_GET["id"];
-			$this->_braintree_init();
+			//$this->_braintree_init();
 			$result = Braintree_TransparentRedirect::confirm($_SERVER['QUERY_STRING']);
 
 			if (isset($result) && $result->success) {
@@ -320,8 +317,43 @@ class Epay extends CI_Controller {
 		}
 	}
 
+	private function _set_transaction_default(){
+		switch ($this->currency) {
+			case 'THB':
+				$this->merchant_account_id = 'accept_thb';
+				$this->payment_submission_url = $this->braintree_submission_url;
+				break;
+			case 'HKD':
+				$this->merchant_account_id = 'accept_hkd';
+				$this->payment_submission_url = $this->braintree_submission_url;
+				break;
+			case 'SGD':
+				$this->merchant_account_id = 'accept_sgd';
+				$this->payment_submission_url = $this->braintree_submission_url;
+				break;
+			default:
+				$this->merchant_account_id = 'wwwmuhibulcom';
+				$this->payment_submission_url = site_url('epay/process');
+				break;
+		}
+
+		if($this->merchant_account_id == 'wwwmuhibulcom'){
+			$this->tr_data = '';
+		}else{
+			$this->tr_data = Braintree_TransparentRedirect::transactionData(
+						array(
+							'redirectUrl' => site_url("epay/braintree"),
+							'transaction' => array(
+								'type' => 'sale',
+								'merchantAccountId' => $this->merchant_account_id
+							)
+						)
+					);
+		}
+	}
+
 	private function _braintree_transparent_redirect(){
-		$this->_braintree_init();
+		//$this->_braintree_init();
 		$url = Braintree_TransparentRedirect::url();
 		//echo '<pre>';print_r($url);echo '</pre>';
 
@@ -428,7 +460,7 @@ class Epay extends CI_Controller {
 	}
 
 	private function _pay_with_braintree(){
-		$this->_braintree_init();
+		//$this->_braintree_init();
 		switch ($this->currency) {
 			case 'THB':
 				$merchantAccountId = 'accept_thb';
