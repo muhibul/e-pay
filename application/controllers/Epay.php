@@ -5,18 +5,18 @@ class Epay extends CI_Controller {
 
 	var $price;
 	var $qty;
-	var $sub_total;
+	var $subTotal;
 	var $total;
 	var $currency;
 	var $lastName;
 	var $firstName;
 	var $cardholderName;
 	var $cardNumber;
-	var $cc_exp_month;
-	var $cc_exp_yr;
-	var $cc_ccv;
-	var $cc_type;
-	var $payment_error;
+	var $ccExpMonth;
+	var $ccExpYr;
+	var $ccCvv;
+	var $ccType;
+	var $paymentError;
 	var $payment_submission_url;
 	var $braintree_submission_url;
 	var $paypal_submission_url;
@@ -37,7 +37,7 @@ class Epay extends CI_Controller {
 		$data['payment_submission_url'] = $this->payment_submission_url;
 		$data['tr_data'] = $this->tr_data;
 		$data['selected_currency'] = $this->currency;
-		
+
 		$this->load->view('order_form', $data);
 	}
 
@@ -65,7 +65,7 @@ class Epay extends CI_Controller {
 	            'log.LogEnabled' => false,
 	            'log.FileName' => '../PayPal.log',
 	            'log.LogLevel' => 'DEBUG', // PLEASE USE `FINE` LEVEL FOR LOGGING IN LIVE ENVIRONMENTS
-	            'cache.enabled' => true,
+	            'cache.enabled' => false,
 	            // 'http.CURLOPT_CONNECTTIMEOUT' => 30
 	            // 'http.headers.PayPal-Partner-Attribution-Id' => '123123123'
 	        )
@@ -78,7 +78,8 @@ class Epay extends CI_Controller {
 		$this->load->helper(array('form', 'url'));
 		$this->load->library('form_validation');
 
-		$this->form_validation->set_rules('transaction[amount]', 'Price', 'trim|required');
+		$this->form_validation->set_rules('transaction[amount]', 'Price', 'trim|numeric|required');
+		$this->form_validation->set_rules('transaction[credit_card][number]', 'Credit Card Number', 'callback_luhn_check');//luhn_check
 		$this->form_validation->set_rules('transaction[credit_card][cvv]', 'CCV Number', 'trim|required|min_length[3]|max_length[4]|is_natural');
 		$this->form_validation->set_rules('transaction[credit_card][expiration_year]', 'Credit Card Expiration Year', 'trim|required|min_length[4]|max_length[4]|is_natural');
 
@@ -89,8 +90,8 @@ class Epay extends CI_Controller {
 			//echo '<pre>';print_r($posted_values);echo '</pre>';exit();
 			$this->price = $posted_values['amount'];
 			$this->qty = 1;
-			$this->sub_total = $this->price * $this->qty;
-			$this->total = $this->sub_total;
+			$this->subTotal = $this->price * $this->qty;
+			$this->total = $this->subTotal;
 			$this->currency = $this->input->post('cur', TRUE);
 			$full_name = $this->input->post('full_name', TRUE);
 			$full_name = explode(' ', $full_name);
@@ -98,21 +99,18 @@ class Epay extends CI_Controller {
 			$this->firstName = implode(' ', $full_name);
 			$this->cardholderName = $posted_values['credit_card']['cardholder_name'];
 			$this->cardNumber = $posted_values['credit_card']['number'];
-			$this->cc_exp_month = $posted_values['credit_card']['expiration_month'];
-			$this->cc_exp_yr = $posted_values['credit_card']['expiration_year'];
-			$this->cc_ccv = $posted_values['credit_card']['cvv'];
-			$this->cc_type = $this->input->post('cc_type', TRUE);
+			$this->ccExpMonth = $posted_values['credit_card']['expiration_month'];
+			$this->ccExpYr = $posted_values['credit_card']['expiration_year'];
+			$this->ccCvv = $posted_values['credit_card']['cvv'];
+			$this->ccType = $this->input->post('cc_type', TRUE);
 
 			if($this->currency == 'USD' || $this->currency == 'EUR' || $this->currency == 'AUD'){
-				if($this->cc_type == 'amex' && $this->currency != 'USD'){
-					$this->payment_error = '{"message": "AMEX is possible to use only for USD","information_link": ""}';
+				if($this->ccType == 'amex' && $this->currency != 'USD'){
+					$this->paymentError = '{"message": "AMEX is possible to use only for USD","information_link": ""}';
 					$this->_handle_error();
 				}else{
 					$this->_pay_with_paypal();
 				}
-			}else{
-				$payment = $this->_braintree_transparent_redirect();
-				//$payment = $this->_pay_with_braintree();
 			}
 		}
 	}
@@ -162,11 +160,11 @@ class Epay extends CI_Controller {
 		// A resource representing a credit card that can be
 		// used to fund a payment.
 		$card = new PayPal\Api\CreditCard();
-		$card->setType($this->cc_type)
+		$card->setType($this->ccType)
 		    ->setNumber($this->cardNumber)
-		    ->setExpireMonth($this->cc_exp_month)
-		    ->setExpireYear($this->cc_exp_yr)
-		    ->setCvv2($this->cc_ccv)
+		    ->setExpireMonth($this->ccExpMonth)
+		    ->setExpireYear($this->ccExpYr)
+		    ->setCvv2($this->ccCvv)
 		    ->setFirstName($this->firstName)
 		    ->setLastName($this->lastName);
 
@@ -203,7 +201,7 @@ class Epay extends CI_Controller {
 		// payment information such as tax, shipping
 		// charges etc.
 		$details = new PayPal\Api\Details();
-		$details->setSubtotal($this->sub_total);
+		$details->setSubtotal($this->subTotal);
 
 		// ### Amount
 		// Lets you specify a payment amount.
@@ -240,14 +238,14 @@ class Epay extends CI_Controller {
 		    $payment->create($apiContext);
 		    $this->_paypal_process_result($payment);
 		} catch (\PayPal\Exception\PayPalConnectionException $ex) {
-			$this->payment_error = $ex->getData();
+			$this->paymentError = $ex->getData();
 			$this->_handle_error();
 		}
 
 	} //end _pay_with_paypal()
 
 	private function _handle_error(){
-		$err_data = json_decode($this->payment_error);
+		$err_data = json_decode($this->paymentError);
 		$this->load->view('error_result', $err_data);
 	}
 
@@ -312,7 +310,7 @@ class Epay extends CI_Controller {
 			}
 		}else{
 			//payment not success
-			$this->payment_error = '{"message": "Payment was not successfull.","information_link": ""}';
+			$this->paymentError = '{"message": "Payment was not successfull.","information_link": ""}';
 			$this->_handle_error();
 		}
 	}
@@ -352,200 +350,38 @@ class Epay extends CI_Controller {
 		}
 	}
 
-	private function _braintree_transparent_redirect(){
-		//$this->_braintree_init();
-		$url = Braintree_TransparentRedirect::url();
-		//echo '<pre>';print_r($url);echo '</pre>';
-
-		switch ($this->currency) {
-			case 'THB':
-				$merchantAccountId = 'accept_thb';
-				break;
-			case 'HKD':
-				$merchantAccountId = 'accept_hkd';
-				break;
-			case 'SGD':
-				$merchantAccountId = 'accept_sgd';
-				break;
-			default:
-				$merchantAccountId = 'wwwmuhibulcom';
-				break;
+	/* Luhn algorithm number checker - (c) 2005-2008 shaman - www.planzero.org */
+	public function luhn_check($num) {
+		if(empty(trim($num))){
+			$msg = 'The %s is required.';
+			$result = FALSE;
+		}else if(!is_numeric($num)){
+			$msg = 'The %s should contain numeric values only.';
+			$result = FALSE;
+		}else{
+			$num = preg_replace('/[^\d]/', '', $num);
+		    settype($num, 'string');
+			$sumTable = array(
+				array(0,1,2,3,4,5,6,7,8,9),
+				array(0,2,4,6,8,1,3,5,7,9)
+			);
+			$sum = 0;
+			$flip = 0;
+			// If the total mod 10 equals 0, the number is valid
+			for ($i = strlen($num) - 1; $i >= 0; $i--) {
+				$sum += $sumTable[$flip++ & 0x1][$num[$i]];
+			}
+			$result = $sum % 10 === 0;
+		    $msg = 'The %s is not valid. Please use numeric values only with no space or any special characters';
 		}
-
-
-		$tr_data = Braintree_TransparentRedirect::transactionData(
-						array(
-							'redirectUrl' => "http://" . $_SERVER["SERVER_NAME"] . ":" . $_SERVER["SERVER_PORT"] . parse_url($_SERVER["REQUEST_URI"], PHP_URL_PATH),
-							'transaction' => array(
-								'amount' => $this->total, 
-								'type' => 'sale'
-							)
-						)
-					);
-		echo '<pre>';print_r($tr_data);echo '</pre>';
-
-		// set post fields //transaction[customer][first_name]
-		$transaction = array(
-			'transaction' => array(
-				'amount' => $this->total,
-				'merchant_account_id' => $merchantAccountId,
-				'credit_card' => array(
-					'cardholder_name' => $this->cardholderName,
-					'number' => $this->cardNumber,
-					'expiration_date' => $this->cc_exp_month.'/'.$this->cc_exp_yr,
-					'cvv' => $this->cc_ccv,
-				),
-				'customer' => array(
-					'first_name' => $this->firstName,
-					'last_name' => $this->lastName,
-					'company' => 'Braintree',
-					'email' => 'dan@example.com',
-					'phone' => '419-555-1234',
-					'fax' => '419-555-1235',
-					'website' => 'http://braintreepayments.com'
-				),
-			),
-			'tr_data' => $tr_data
-		);
-		$postvars = http_build_query($transaction);
-		// echo '<pre>';print_r($postvars);echo '</pre>';
-
-		/*$transaction = [
-			'transaction' => [
-				'amount' => $this->total,
-				'merchant_account_id' => $merchantAccountId,
-				'credit_card' => [
-					'cardholder_name' => $this->cardholderName,
-					'number' => $this->cardNumber,//4148529247832259, 5105105105105100
-					'expiration_date' => $this->cc_exp_month.'/'.$this->cc_exp_yr,
-					'cvv' => $this->cc_ccv,
-				],
-				'customer' => [
-					'first_name' => $this->firstName,
-					'last_name' => $this->lastName,
-					'company' => 'Braintree',
-					'email' => 'dan@example.com',
-					'phone' => '419-555-1234',
-					'fax' => '419-555-1235',
-					'website' => 'http://braintreepayments.com'
-				]
-			],
-			'tr_data' => $tr_data
-		];*/
-		/*$transaction['transaction']['amount'] = $this->total;
-		$transaction['transaction']['merchant_account_id'] = $merchantAccountId;
-		$transaction['transaction']['credit_card']['cardholder_name'] = $this->cardholderName;
-		$transaction['transaction']['credit_card']['number'] = $this->cardholderName;
-		$transaction['transaction']['credit_card']['expiration_date'] = $this->cc_exp_month.'/'.$this->cc_exp_yr;
-		$transaction['transaction']['credit_card']['cvv'] = $this->cc_ccv;
-		$transaction['transaction']['customer']['first_name'] = $this->firstName;
-		$transaction['transaction']['customer']['last_name'] = $this->lastName;
-		$transaction['tr_data'] = $tr_data;*/
-		// echo '<pre>';print_r($transaction);echo '</pre>';
-		//exit();
-
-		$ch = curl_init($url);
-		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-		curl_setopt($ch, CURLOPT_POSTFIELDS, $postvars);
-		// curl_setopt($ch, CURLOPT_HTTPHEADER, http_build_query($transaction['transaction']));
-		$response = curl_exec($ch);
-		echo '<pre>';print_r($response);echo '</pre>';
-		curl_close($ch);
 		
-		if (isset($_GET["id"])) {
-            $result = Braintree_TransparentRedirect::confirm($_SERVER['QUERY_STRING']);
-        }
-        redirect('/login/form/', 'refresh');
-		//var_dump($response);
-	}
-
-	private function _pay_with_braintree(){
-		//$this->_braintree_init();
-		switch ($this->currency) {
-			case 'THB':
-				$merchantAccountId = 'accept_thb';
-				break;
-			case 'HKD':
-				$merchantAccountId = 'accept_hkd';
-				break;
-			case 'SGD':
-				$merchantAccountId = 'accept_sgd';
-				break;
-			default:
-				$merchantAccountId = 'wwwmuhibulcom';
-				break;
-		}
-		echo $number = $this->cardNumber;
-
-		try {
-		    $transaction = Braintree_Transaction::saleNoValidate(array(
-			    'amount' => $this->total,
-			    'merchantAccountId' => $merchantAccountId,
-			    'creditCard' => array(
-			        'cardholderName' => $this->cardholderName,
-			        'number' => $this->cardNumber,//4148529247832259, 5105105105105100
-			        'expirationDate' => $this->cc_exp_month.'/'.$this->cc_exp_yr,
-			        'cvv' => $this->cc_ccv,
-			    ),
-			    'customer' => array(
-			        'firstName' => $this->firstName,
-			        'lastName' => $this->lastName,
-			        'company' => 'Braintree',
-			        'email' => 'dan@example.com',
-			        'phone' => '419-555-1234',
-			        'fax' => '419-555-1235',
-			        'website' => 'http://braintreepayments.com'
-			    ),
-			));
-			echo '<pre>';print_r($transaction);echo '</pre>';
-		} catch (Braintree_Exception_ForgedQueryString $ex) {
-			echo $ex->getMessage();
-		} catch (Braintree_Exception_Authentication $ex){
-			echo $ex->getMessage();
-		} catch (Braintree_Exception_Authorization $ex){
-			echo $ex->getMessage();
-		} catch (Braintree_Exception_Configuration $ex){
-			echo $ex->getMessage();
-		} catch (Braintree_Exception_DownForMaintenance $ex){
-			echo $ex->getMessage();
-		} catch (Braintree_Exception_InvalidChallenge $ex){
-			echo $ex->getMessage();
-		} catch (Braintree_Exception_InvalidSignature $ex){
-			echo $ex->getMessage();
-		} catch (Braintree_Exception_NotFound $ex){
-			echo $ex->getMessage();
-		} catch (Braintree_Exception_ServerError $ex){
-			echo $ex->getMessage();
-		} catch (Braintree_Exception_SSLCertificate $ex){
-			echo $ex->getMessage();
-		} catch (Braintree_Exception_Unexpected $ex){
-			echo $ex->getMessage();
-		} catch (Braintree_Exception_UpgradeRequired $ex){
-			echo $ex->getMessage();
-		} catch (Braintree_Exception_ValidationsFailed $ex){
-			echo $ex->getMessage();
+		if(!$result){
+			$this->form_validation->set_message('luhn_check', $msg);
+			return FALSE;
+		}else{
+			return TRUE;
 		}
 		
 
-		/*$transaction = Braintree_Transaction::saleNoValidate(array(
-			'amount' => $this->total,
-			'merchantAccountId' => $marchant_account_id,
-			'creditCard' => array(
-				'cardholderName' => $this->cardholderName,
-				'number' => $this->cardNumber,
-				'expirationDate' => $this->cc_exp_month.'/'.$this->cc_exp_yr,
-				'cvv' => $this->cc_ccv,
-			),
-			'customer' => array(
-				'firstName' => $this->firstName,
-				'lastName' => $this->lastName,
-				'company' => 'Braintree',
-				'email' => 'dan@example.com',
-				'phone' => '419-555-1234',
-				'fax' => '419-555-1235',
-				'website' => 'http://braintreepayments.com'
-			),
-		));*/
-		//echo '<pre>';print_r($transaction);echo '</pre>';
 	}
 }
