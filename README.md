@@ -1,7 +1,7 @@
 # e-pay
 Demo for online payment system using Paypal REST API and Braintree Payment Gateway
 
-#Configuration
+## Configuration
 1. Go to 'application/config/config.php' and change the line if necessary: $config['base_url'] = 'http://localhost/e-pay/'; 
 2. Run the sql file 'epay.sql'. It will create a database 'epay' and 2 tables.
 3. Go to 'application/config/database.php' and change username, password and database in line 79, 80, 81.
