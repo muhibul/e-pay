@@ -75,14 +75,20 @@ defined('BASEPATH') OR exit('No direct script access allowed');
 
 	<div id="body">
 		<?php
-			if($msg_type == 'error') 
-				$class = 'error';
-			else
-				$class = 'success';
+			$class = '';
+
+			if(isset($msg_type)){
+				if($msg_type == 'error') 
+					$class = 'error';
+				else
+					$class = 'success';
+			}else{
+				$msg_type = '';
+			}
 		?>
 		<p class="<?php echo $class; ?>">
 			<?php
-				echo $msg;
+				if(isset($msg)) echo $msg;
 			?>
 		</p>
 

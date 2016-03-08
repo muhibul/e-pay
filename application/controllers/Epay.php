@@ -74,8 +74,11 @@ class Epay extends CI_Controller {
 	    return $apiContext;
 	}
 
+	/**
+	 * Validate post values before paypal transaction
+	 * 
+	 */
 	public function process(){
-		$this->load->helper(array('form', 'url'));
 		$this->load->library('form_validation');
 
 		$this->form_validation->set_rules('transaction[amount]', 'Price', 'trim|numeric|required');
@@ -115,9 +118,84 @@ class Epay extends CI_Controller {
 		}
 	}
 
+	/**
+	 * Process transaction using paypal REST API
+	 * 
+	 */
+	private function _pay_with_paypal(){
+		$apiContext = $this->_getApiContext();
+
+		// ### CreditCard that can be used to fund a payment.
+		$card = new PayPal\Api\CreditCard();
+		$card->setType($this->ccType)
+		    ->setNumber($this->cardNumber)
+		    ->setExpireMonth($this->ccExpMonth)
+		    ->setExpireYear($this->ccExpYr)
+		    ->setCvv2($this->ccCvv)
+		    ->setFirstName($this->firstName)
+		    ->setLastName($this->lastName);
+
+		// ### FundingInstrument
+		$fi = new PayPal\Api\FundingInstrument();
+		$fi->setCreditCard($card);
+
+		// ### Payer
+		$payer = new PayPal\Api\Payer();
+		$payer->setPaymentMethod("credit_card")
+		    ->setFundingInstruments(array($fi));
+
+		// ### Itemized information
+		$item1 = new PayPal\Api\Item();
+		$item1->setName('Ground Coffee 40 oz')
+		    ->setDescription('Ground Coffee 40 oz')
+		    ->setCurrency($this->currency)
+		    ->setQuantity($this->qty)
+		    ->setPrice($this->price);
+
+		$itemList = new PayPal\Api\ItemList();
+		$itemList->setItems(array($item1));
+
+		// ### Additional payment details such as tax, shipping charges etc.
+		$details = new PayPal\Api\Details();
+		$details->setSubtotal($this->subTotal);
+
+		// ### Amount
+		$amount = new PayPal\Api\Amount();
+		$amount->setCurrency($this->currency)
+		    ->setTotal($this->total)
+		    ->setDetails($details);
+
+		// ### Transaction
+		$transaction = new PayPal\Api\Transaction();
+		$transaction->setAmount($amount)
+		    ->setItemList($itemList)
+		    ->setDescription("Payment description demo")
+		    ->setInvoiceNumber(uniqid());
+
+		// ### Payment
+		$payment = new PayPal\Api\Payment();
+		$payment->setIntent("sale")
+		    ->setPayer($payer)
+		    ->setTransactions(array($transaction));
+
+		// For Sample Purposes Only.
+		//$request = clone $payment;
+
+		// ### Create Payment
+		try {
+		    $payment->create($apiContext);
+		    $this->_paypal_process_result($payment);
+		} catch (\PayPal\Exception\PayPalConnectionException $ex) {
+			$this->paymentError = $ex->getData();
+			$this->_handle_error();
+		}
+
+	} //end _pay_with_paypal()
+
 	private function _paypal_process_result($result){
 		$this->load->model('Transaction_model');
 		$this->load->model('Item_model');
+		$this->load->library('session');
 
 		$result = json_decode($result); //echo '<pre>';print_r($result);echo '</pre>';
 		$parsed_data = array();
@@ -150,105 +228,45 @@ class Epay extends CI_Controller {
 		$parsed_data['msg'] = 'Transaction Successfull.';
 		$parsed_data['msg_type'] = 'success';
 
-		$this->load->view('payment_result', $parsed_data);
+		//redirect in order to prevent re-submission
+		$this->session->set_userdata('parsed_data', $parsed_data);
+		redirect('/epay/result/', 'refresh');
 	}
 
-	private function _pay_with_paypal(){
-		$apiContext = $this->_getApiContext();
-
-		// ### CreditCard
-		// A resource representing a credit card that can be
-		// used to fund a payment.
-		$card = new PayPal\Api\CreditCard();
-		$card->setType($this->ccType)
-		    ->setNumber($this->cardNumber)
-		    ->setExpireMonth($this->ccExpMonth)
-		    ->setExpireYear($this->ccExpYr)
-		    ->setCvv2($this->ccCvv)
-		    ->setFirstName($this->firstName)
-		    ->setLastName($this->lastName);
-
-		// ### FundingInstrument
-		// A resource representing a Payer's funding instrument.
-		// For direct credit card payments, set the CreditCard
-		// field on this object.
-		$fi = new PayPal\Api\FundingInstrument();
-		$fi->setCreditCard($card);
-
-		// ### Payer
-		// A resource representing a Payer that funds a payment
-		// For direct credit card payments, set payment method
-		// to 'credit_card' and add an array of funding instruments.
-		$payer = new PayPal\Api\Payer();
-		$payer->setPaymentMethod("credit_card")
-		    ->setFundingInstruments(array($fi));
-
-		// ### Itemized information
-		// (Optional) Lets you specify item wise
-		// information
-		$item1 = new PayPal\Api\Item();
-		$item1->setName('Ground Coffee 40 oz')
-		    ->setDescription('Ground Coffee 40 oz')
-		    ->setCurrency($this->currency)
-		    ->setQuantity($this->qty)
-		    ->setPrice($this->price);
-
-		$itemList = new PayPal\Api\ItemList();
-		$itemList->setItems(array($item1));
-
-		// ### Additional payment details
-		// Use this optional field to set additional
-		// payment information such as tax, shipping
-		// charges etc.
-		$details = new PayPal\Api\Details();
-		$details->setSubtotal($this->subTotal);
-
-		// ### Amount
-		// Lets you specify a payment amount.
-		// You can also specify additional details
-		// such as shipping, tax.
-		$amount = new PayPal\Api\Amount();
-		$amount->setCurrency($this->currency)
-		    ->setTotal($this->total)
-		    ->setDetails($details);
-
-		// ### Transaction
-		// A transaction defines the contract of a
-		// payment - what is the payment for and who
-		// is fulfilling it. 
-		$transaction = new PayPal\Api\Transaction();
-		$transaction->setAmount($amount)
-		    ->setItemList($itemList)
-		    ->setDescription("Payment description demo")
-		    ->setInvoiceNumber(uniqid());
-
-		// ### Payment
-		// A Payment Resource; create one using
-		// the above types and intent set to sale 'sale'
-		$payment = new PayPal\Api\Payment();
-		$payment->setIntent("sale")
-		    ->setPayer($payer)
-		    ->setTransactions(array($transaction));
-
-		// For Sample Purposes Only.
-		$request = clone $payment;
-
-		// ### Create Payment
-		try {
-		    $payment->create($apiContext);
-		    $this->_paypal_process_result($payment);
-		} catch (\PayPal\Exception\PayPalConnectionException $ex) {
-			$this->paymentError = $ex->getData();
-			$this->_handle_error();
-		}
-
-	} //end _pay_with_paypal()
-
+	/**
+	 * General function to process error data
+	 * 
+	 */
 	private function _handle_error(){
+		$this->load->library('session');
 		$err_data = json_decode($this->paymentError);
-		$this->load->view('error_result', $err_data);
+		$this->session->set_userdata('err_data', $err_data);
+		//$this->load->view('error_result', $err_data);
+		redirect('/epay/result/error', 'refresh');
 	}
 
+	/**
+	 * General function to display success/error messages
+	 * 
+	 */
+	public function result($err = ''){
+		$this->load->library('session');
+
+		if($err == 'error'){
+			$err_data = $this->session->userdata('err_data');
+			$this->session->unset_userdata('err_data');
+			$this->load->view('error_result', $err_data);
+		}else{
+			$parsed_data = $this->session->userdata('parsed_data');
+			$this->session->unset_userdata('parsed_data');
+			$this->load->view('payment_result', $parsed_data);
+		}
+	}
+
+	/**
+	 * Initializes Braintree payment gateway
+	 * 
+	 */
 	private function _braintree_init(){
 		Braintree_Configuration::environment('sandbox');
 		Braintree_Configuration::merchantId('j8zgt44rd2m6dt74');
@@ -259,6 +277,10 @@ class Epay extends CI_Controller {
 		//return $clientToken = Braintree_ClientToken::generate();
 	}
 
+	/**
+	 * Process result returned after braintree transactioin
+	 * 
+	 */
 	private function _braintree_process_result($transaction, $transaction_id){
 		$this->load->model('Transaction_model');
 		$this->load->model('Item_model');
@@ -266,8 +288,6 @@ class Epay extends CI_Controller {
 		$parsed_data['payment_id'] = $transaction_id;
 		$parsed_data['total'] = $transaction->amount;
 		$parsed_data['currency'] = $transaction->currencyIsoCode;
-		// $parsed_data['subtotal'] = $transaction->amount->details->subtotal;
-		// $parsed_data['description'] = $transaction->description;
 		$parsed_data['invoice_number'] = $transaction->id;
 
 		$item_data['invoice_number'] = $transaction->id;
@@ -275,7 +295,6 @@ class Epay extends CI_Controller {
 		$item_data['price'] = $transaction->amount;
 		$item_data['currency'] = $transaction->currencyIsoCode;
 		$item_data['quantity'] = 1;
-		// $item_data['description'] = $item->description;
 
 		//insert into 'items' table
 		$this->Item_model->add_item($item_data);
@@ -290,23 +309,33 @@ class Epay extends CI_Controller {
 		$this->load->view('payment_result', $parsed_data);
 	}
 
+	/**
+	 * Performs transaction using Braintree TransparentRedirect
+	 * 
+	 */
 	public function braintree(){
 		if (isset($_GET["id"])) {
 			$transaction_id = $_GET["id"];
 			//$this->_braintree_init();
-			$result = Braintree_TransparentRedirect::confirm($_SERVER['QUERY_STRING']);
+			try{
+				$result = Braintree_TransparentRedirect::confirm($_SERVER['QUERY_STRING']);
 
-			if (isset($result) && $result->success) {
-				$transaction = $result->transaction;
-				//echo '<pre>';print_r($result);echo '</pre>';
-				$this->_braintree_process_result($transaction, $transaction_id);
-			}else{
-			    foreach($result->errors->deepAll() as $error) {
-			        echo('<div style="color: red;">' . $error->message . '</div>');
-			    }
-			    $parsed_data['msg'] = 'Transaction Failed.';
-				$parsed_data['msg_type'] = 'error';
-				//echo '<pre>';print_r($result->errors);echo '</pre>';
+				if (isset($result) && $result->success) {
+					$transaction = $result->transaction;
+					//echo '<pre>';print_r($result);echo '</pre>';
+					$this->_braintree_process_result($transaction, $transaction_id);
+				}else{
+				    foreach($result->errors->deepAll() as $error) {
+				        echo('<div style="color: red;">' . $error->message . '</div>');
+				    }
+				    $parsed_data['msg'] = 'Transaction Failed.';
+					$parsed_data['msg_type'] = 'error';
+				}
+			} catch (Braintree_Exception_NotFound $ex){
+				//echo $ex->getMessage();
+				//payment not success
+				$this->paymentError = '{"message": "Wrong data passed.","information_link": ""}';
+				$this->_handle_error();
 			}
 		}else{
 			//payment not success
@@ -315,6 +344,10 @@ class Epay extends CI_Controller {
 		}
 	}
 
+	/**
+	 * Used while doing transaction using Braintree in order to select 
+	 * merchant_account_id for different currencies
+	 */
 	private function _set_transaction_default(){
 		switch ($this->currency) {
 			case 'THB':

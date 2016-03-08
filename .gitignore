@@ -1,6 +1,9 @@
 .DS_Store
 
 resources
+first.php
+saleNoValidate.php
+transparentRedirect.php
 
 application/cache/*
 !application/cache/index.html
